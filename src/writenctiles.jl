@@ -54,9 +54,54 @@ struct NCData
     precision::Type
 end
 
+"""
+    NewData
+
+NewData data structure. Contains info to create new field from an operation performed on
+    one or more fields. Binary operations must be associative. Will be applied as op(...op(op(f1,f2),f3)...,fn)
+
+For sum:
+sumData = NewData("totalflds",flds,+,true,())
+
+For mean:
+NewData("meanflds",sumData, x -> x ./ length(flds),false,())
+
+More complex function:
+function myfun(flds::Array,arg1,arg2,...)
+    ...
+end
+
+NewData("mynewfld",flds,myfun,false,(arg1,arg2,...))
+
+"""
+struct NewData
+    name::String
+    precision::Type
+    flds::Union{BinData,NCData,Array,NewData}
+    operation
+    isbinaryop::Bool
+    fncargs::Tuple
+    readdata
+    savenames::Array
+end
+"""
+    NewData(name::String, flds::Union{BinData,NCData,Array,NewData}, operation, isbinaryop::Bool, fncargs::Tuple)
+
+Construct a NewData with default readdata function.
+"""
+function NewData(name::String, precision::Type, flds::Union{BinData,NCData,Array,NewData}, operation, isbinaryop::Bool, fncargs::Tuple)
+    return NewData(name::String, precision::Type, flds::Union{BinData,NCData,Array,NewData}, operation, isbinaryop::Bool, fncargs::Tuple,readdata,"")
+end
+
 
 function getnsteps(d)
-    if isa(d,BinData)
+    if isa(d,NewData)
+        if isa(d.flds,Array{BinData}) || isa(d.flds,Array{NCData})
+            nsteps = getnsteps(d.flds[1])
+        else
+            nsteps = getnsteps(d.flds)
+        end
+    elseif isa(d,BinData)
         if isa(d.fnames,Array)
             nsteps = length(d.fnames)
         else
@@ -207,7 +252,7 @@ function getindex(d::BinData,i::Integer) # Gets file at time index i
         newfnames = d.fnames
     end
     
-    BinData(newfnames,d.precision,d.iosize)
+    BinData(newfnames,d.precision,d.iosize,d.fldidx)
 end
 
 """
@@ -296,6 +341,65 @@ function readdata(flddata,tidx=1)
     return res
 end
 
+isfiledata(x) = isa(x,BinData) || isa(x,NCData)
+function calcNewFld(d::NewData,tidx,returnres=true)
+    typeof(d.flds)
+    if isa(d.flds,NewData)
+        flds = calcNewFld(d.flds,tidx)
+    else
+        flds = d.flds
+        if isa(flds,Array) && length(flds) == 1 && isfiledata(flds[1])
+            flds = flds[1]
+        end
+    end
+
+    if d.isbinaryop == false
+        if ~isa(flds,Array)
+            fldin = d.readdata(flds,tidx)
+        elseif isa(flds[1],BinData)
+            fldin = [BinData(fd.fnames[tidx],fd.precision,fd.iosize,fd.fldidx) for fd in d.flds]
+        else # Not supporting Array of NewData for non-binary ops
+            fldin = flds
+        end
+        if isempty(d.fncargs) || ismissing(d.fncargs)
+            res = d.operation(fldin,d.readdata)
+        else
+            args = d.fncargs
+            if any(isa.(args,Ref(BinData)))
+                bidx = findfirst(isa.(args,Ref(BinData)))
+                argdata = readbin(args[bidx],tidx)
+                args = Base.setindex(args,argdata,bidx)
+            end
+            res = d.operation(fldin,d.readdata,args...)
+        end
+
+    else
+        flds = d.flds
+
+        res = d.readdata(flds[1],tidx)
+
+        for f = 2:length(flds)
+            if isempty(d.fncargs) || ismissing(d.fncargs)
+                res = d.operation(res,d.readdata(flds[f],tidx))
+            else
+                res = d.operation(res,d.readdata(flds[f],tidx),d.fncargs...)
+            end
+        end
+    end
+
+    if ~isempty(d.savenames)
+        write(d.savenames[tidx],hton.(res))
+    end
+    # if length(size(res)) == 3
+    #     h = heatmap(res[:,:,1])
+    #     save("plots/"*string(now())*d.name*".png",h)
+    # end
+    if returnres
+        return res
+    else
+        return nothing
+    end
+end
 
 """
     addDim(ds::NCDatasets.Dataset,dimvar::NCvar) # NCDatasets
@@ -385,6 +489,7 @@ function addData(v::Union{NCDatasets.CFVariable,NetCDF.NcVar,Array},var::NCvar,s
     isBinData = isa(var.values,BinData)
     isNCData = isa(var.values,NCData)
     isTileData = isa(var.values,TileData)
+    isNewData = isa(var.values,NewData)
     if isTileData
         isBinData = isa(var.values.vals,BinData)
     end
@@ -393,7 +498,7 @@ function addData(v::Union{NCDatasets.CFVariable,NetCDF.NcVar,Array},var::NCvar,s
     if hastimedim(var)
         ndims = ndims-1
     end
-    if isBinData || isNCData || isTileData || isa(var.values[1],Array) # Binary files or array of timesteps
+    if isBinData || isNCData || isTileData || isNewData || isa(var.values[1],Array) # Binary files or array of timesteps
         
         if isBinData && ~ isTileData
             if isa(var.values.fnames,Array)
@@ -409,6 +514,8 @@ function addData(v::Union{NCDatasets.CFVariable,NetCDF.NcVar,Array},var::NCvar,s
             else
                 if isBinData || isNCData
                     v0 = readdata(var.values,i)
+                elseif isNewData
+                    v0 = calcNewFld(var.values,i)
                 else
                     v0 = var.values[i]
                 end

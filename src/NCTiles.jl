@@ -7,8 +7,8 @@ using NetCDF, MeshArrays, Printf, NCDatasets
 
 import Base: getindex
 
-export NCvar, BinData, NCData, TileData, readbin
-export createfile, addDim, addVar, addData, addDimData,
+export NCvar, BinData, NCData, TileData, NewData, readbin
+export createfile, addDim, addVar, addData, addDimData, calcNewFld,
         readncfile, parsemeta, readAvailDiagnosticsLog
         
 include("writenctiles.jl")
