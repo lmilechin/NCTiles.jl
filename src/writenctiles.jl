@@ -54,6 +54,36 @@ struct NCData
     precision::Type
 end
 
+
+function getnsteps(d)
+    if isa(d,BinData)
+        if isa(d.fnames,Array)
+            nsteps = length(d.fnames)
+        else
+            nsteps = 1
+        end
+    elseif isa(d,NCData)
+        ds = Dataset(d.fname)
+        tdim = dimnames(ds[d.varname])[end]
+        timeUnits = ["minutes","seconds","hours","days","minute","second","hour","day"]
+        if any(occursin.(timeUnits,Ref(lowercase(ds[tdim].attrib["units"]))))
+            nsteps = length(ds[tdim])
+        else
+            nsteps = 1
+        end
+    elseif isa(d,TileData)
+        nsteps = getnsteps(d.vals)
+    elseif isa(d,Array) && isa(d[1],Array)
+        nsteps = length(d)
+    else
+        nsteps = 1
+    end
+
+    return nsteps
+end
+
+
+
 """
     NewData
 
@@ -160,13 +190,13 @@ function TileData(vals,tilesize::Tuple)
     return TileData(vals,tileinfo,tilesize,Float32,Int(maximum(tileinfo["tileNo"])))
 end
 
-#=
+"""
     findidx(A,val)
 
 Helper function for getting the indices for tiles. A is a gcmfaces struct, val is a
     numeric value to get the indices of. Returns a Dict of the indices for each face.
     Not currently exported. Maybe move to MeshArrays?
-=#
+"""
 function findidx(A,val)
     tileidx = Dict()
     for i = 1:A.nFaces
@@ -176,12 +206,12 @@ function findidx(A,val)
     return tileidx
 end
 
-#=
+"""
     gettile(fldvals,tileinfo,tilesize,tilenum::Int)
 
 Helper function for retrieving a tile from a gcmfaces struct as a numeric Array. Not
     currently exported.
-=#
+"""
 function gettile(fldvals,tileinfo,tilesize,tilenum::Int)
     tilidx = findidx(tileinfo["tileNo"],tilenum)
 
@@ -213,12 +243,12 @@ function gettile(fldvals,tileinfo,tilesize,tilenum::Int)
     return tilfld
 end
 
-#=
+"""
     gettiles(fldvals,tilenum::Int)
 
 Helper function for retrieving a tile from a gcmfaces struct as a numeric Array along 
     with associated latitude and longitude. Not currently exported.
-=#
+"""
 function gettiles(tilfld,tilenum::Int)
     tilesize = tilfld.tilesize
 
@@ -401,6 +431,7 @@ function calcNewFld(d::NewData,tidx,returnres=true)
     end
 end
 
+
 """
     addDim(ds::NCDatasets.Dataset,dimvar::NCvar) # NCDatasets
 
@@ -548,11 +579,11 @@ function addData(v::Union{NCDatasets.CFVariable,NetCDF.NcVar,Array},var::NCvar,s
 end
 
 
-#=
+"""
     writetiles(v,var,tilenum,timeidx=1)
 
 Helper function for writing a tile to a NetCDF file.
-=#
+"""
 function writetiles(v,var,tilenum,timeidx=1)
     if isa(v,Array)
         v = v[findfirst(isequal(var.name),name.(v))]
@@ -758,11 +789,11 @@ function readncfile(fname,backend::Module=NCDatasets)
     return vars,dims,fileatts
 end
 
-#=
+"""
     istimedim(d::NCvar)
 
 Helper function: determines whether d is a time dimension. Not exported.
-=#
+"""
 function istimedim(d::NCvar)
     
     timeUnits = ["minutes","seconds","hours","days","minute","second","hour","day"]
@@ -770,31 +801,31 @@ function istimedim(d::NCvar)
     
 end
 
-#=
+"""
     findtimedim(v::NCvar)
 
 Helper function: finds which dimension is a time dimension, if any. Not exported.
-=#
+"""
 function findtimedim(v::NCvar)
     return findall(istimedim.(v.dims))[1]
 end
 
-#=
+"""
     hastimedim(v::NCvar)
 
 Helper function: determines whether a variable has a time dimension. Not exported.
-=#
+"""
 function hastimedim(v::NCvar)
     ncvardim = isa.(v.dims,NCvar)
     return any(ncvardim) && any(istimedim.(v.dims[ncvardim]))
 end
 
-#=
+"""
     hastimedimdims::Array{NCvar})
 
 Helper function: determines whether an array of dimensions has a time dimension. Not 
     exported.
-=#
+"""
 function hastimedim(dims::Array{NCvar})
     return any(istimedim.(dims))
 end
