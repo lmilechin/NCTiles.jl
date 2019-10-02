@@ -90,7 +90,7 @@ end
 Construct a NewData with default readdata function.
 """
 function NewData(name::String, precision::Type, flds::Union{BinData,NCData,Array,NewData}, operation, isbinaryop::Bool, fncargs::Tuple)
-    return NewData(name::String, precision::Type, flds::Union{BinData,NCData,Array,NewData}, operation, isbinaryop::Bool, fncargs::Tuple,readdata,"")
+    return NewData(name::String, precision::Type, flds::Union{BinData,NCData,Array,NewData}, operation, isbinaryop::Bool, fncargs::Tuple,readdata,[])
 end
 
 
@@ -373,7 +373,7 @@ function calcNewFld(d::NewData,tidx,returnres=true)
             res = d.operation(fldin,d.readdata,args...)
         end
 
-    else
+    else #if binary operation
         flds = d.flds
 
         res = d.readdata(flds[1],tidx)
