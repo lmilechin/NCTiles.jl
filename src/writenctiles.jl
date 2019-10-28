@@ -118,7 +118,7 @@ function TileData(vals,tilesize::Tuple,grid::gcmgrid)
     end
     return TileData(vals,tileinfo,tilesize,Float32,Int(maximum(tileinfo["tileNo"])))
 end
-TileData(vals,tilesize::Tuple,grid::String="LLC90") = TileData(vals,tilesize::Tuple,GCMGridSpec(grid))
+TileData(vals,tilesize::Tuple,grid::String="LLC90") = TileData(vals,tilesize::Tuple,GridSpec(grid))
 
 
 """
@@ -407,7 +407,7 @@ end
 Fill variable with data in netcdf file. Work with both backends 
 (`NCDatasets.jl` or `NetCDF.jl`).
 """
-function addData(v::Union{NCDatasets.CFVariable,NetCDF.NcVar,Array},var::NCvar,startidx=1)
+function addData(v::Union{NCDatasets.CFVariable,NetCDF.NcVar,Array},var::NCvar;startidx=1,land_mask=nothing)
     isBinData = isa(var.values,BinData)
     isNCData = isa(var.values,NCData)
     isTileData = isa(var.values,TileData)
@@ -419,6 +419,7 @@ function addData(v::Union{NCDatasets.CFVariable,NetCDF.NcVar,Array},var::NCvar,s
     if hastimedim(var)
         ndims = ndims-1
     end
+
     if isBinData || isNCData || isTileData || isa(var.values[1],Array) # Binary files or array of timesteps
         
         if isBinData && ~ isTileData
@@ -431,7 +432,7 @@ function addData(v::Union{NCDatasets.CFVariable,NetCDF.NcVar,Array},var::NCvar,s
 
         for i = startidx:nsteps
             if isTileData
-                writetiles.(v,Ref(var),1:var.values.numtiles,Ref(i))
+                writetiles.(v,Ref(var),1:var.values.numtiles,Ref(i),Ref(land_mask))
             else
                 if isBinData || isNCData
                     v0 = readdata(var.values,i)
@@ -472,7 +473,7 @@ end
 
 Helper function for writing a tile to a NetCDF file.
 """
-function writetiles(v,var,tilenum,timeidx=1)
+function writetiles(v,var,tilenum,timeidx=1,land_mask=nothing)
     if isa(v,Array)
         v = v[findfirst(isequal(var.name),name.(v))]
     end
@@ -492,7 +493,10 @@ function writetiles(v,var,tilenum,timeidx=1)
             exarray = tileinfo["XC"]
         end
         v0 = read(readbin(fnames[timeidx],prec,iosize,
-                                        var.values.vals.fldidx),exarray)
+                        var.values.vals.fldidx),exarray)
+        if ~isnothing(land_mask)
+            v0 = v0 .* land_mask
+        end
     else
         if isa(var.values.vals,MeshArray) || isa(var.values.vals,MeshArrays.gcmfaces)
             v0 = var.values.vals
