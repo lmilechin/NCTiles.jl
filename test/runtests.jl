@@ -94,6 +94,11 @@ tempfiles = vcat(testvars["fnames2d"], testvars["fnames3d"],
         writetestfile(ncfiltile2d,flds,NCDatasets)
         savenames = joinpath.(ncfiltile2d*".".*lpad.(string.(1:tilfld2d.numtiles),4,"0").*".nc")
 
+        for k in keys(flds)
+            if k != "thic" && k != "land" && isa(flds[k].values,MeshArray)
+                applylandmask(flds[k],land)
+            end
+        end
         @test all([testfile(fname,flds[fld]) for fname in savenames for fld in keys(flds)])
     end
 

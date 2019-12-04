@@ -70,7 +70,7 @@ for fidx in fldidx
 
         for k in keys(flds)
             if isa(flds[k].values,TileData)
-                addData(fldvars,flds[k],land_mask = land)
+                addData(fldvars,flds[k])
             else
                 tmpfldvars = [fv[findfirst(isequal(k),name.(fv))] for fv in fldvars]
                 addData.(tmpfldvars,Ref(flds[k]))
