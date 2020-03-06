@@ -1,6 +1,7 @@
 .DS_Store
 devel
 docs/build/
-examples/data
-test/GRID_*
-examples/grids
+examples/data/
+examples/grids/
+test/GRID_CS32
+test/CS32.tar.gz

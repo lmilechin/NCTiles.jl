@@ -1,4 +1,4 @@
-using NCTiles, NCDatasets
+using NCTiles, NCDatasets, MeshArrays, Dates
 
 function writetestfile(fname,field,package)
 
@@ -7,14 +7,39 @@ function writetestfile(fname,field,package)
     end
 
     README = ["This file is written as a test for NCTiles.jl."]
-    ds,fldvar,dimlist = createfile(fname,field,README)
+    if isa(field,Dict) # TileData Example
+        savenames = joinpath.(ncfiltile2d*".".*lpad.(string.(1:field["data2d"].values.numtiles),4,"0").*".nc")
+        dims = unique(vcat([field[v].dims for v in keys(field)]...))
+        datasets = [createfile(savenames[tidx],field,README,ntile = length(savenames), itile = tidx) for tidx in 1:length(savenames)]
 
-    addData(fldvar,field)
-    if package == NCDatasets
-        addDimData.(Ref(ds),field.dims)
+        ds = [x[1] for x in datasets]
+        fldvars = [x[2] for x in datasets]
+        #dims = [x[3] for x in datasets]
+
+        for k in keys(field)
+            if isa(field[k].values,TileData)
+                addData(fldvars,field[k])
+            else
+                tmpfldvars = [fv[findfirst(isequal(k),name.(fv))] for fv in fldvars]
+                addData.(tmpfldvars,Ref(field[k]))
+            end
+        end
+
+        for dim in dims
+            addDimData.(ds,Ref(dim))
+        end
+        close.(ds)
+
+    else
+        ds,fldvar,dimlist = createfile(fname,field,README)
+
+        addData(fldvar,field)
+        if package == NCDatasets
+            addDimData.(Ref(ds),field.dims)
+        end
+        # Close the file
+        close(ds)
     end
-    # Close the file
-    close(ds)
 end
 
 function testfile(fname,checkfld)
@@ -27,7 +52,15 @@ function testfile(fname,checkfld)
         dimcheck = Dict()
         # check size
         dimcheck["size"] = length(fildim) == length(d.values)
-        dimcheck["values"] = d.values == fildim
+        if isa(fildim[1],DateTime)
+            dimvals = [Hour.(ds["tim"][t] .- DateTime(replace(d.units,"days since "=>""),"yyyy-mm-dd HH:MM:SS")).value for t in 1:length(ds["tim"])]/24
+            dimcheck["values"] = d.values == dimvals
+        else
+            dimcheck["values"] = d.values == fildim
+            if length(size(d.values)) > 1
+                dimcheck["values"] = d.values[:,1] == fildim
+            end
+        end
         pass = pass && dimcheck["size"] && dimcheck["values"]
         # check attributes
         for k in keys(fildim.attrib)
@@ -58,15 +91,17 @@ function testfile(fname,checkfld)
     # Check values of test data
     varcheck["values"] = false
     if isa(checkfld.values,Array)
+        varcheck["values"] = true
         if isa(checkfld.values[1],Array)
-            varcheck["values"] = true
-            for t in 1:length(checkfld.values)
-                if length(size(dsvar)) == 3
-                    varcheck["values"] = varcheck["values"] && checkfld.values[t] == dsvar[:,:,t]
-                elseif length(size(dsvar)) == 4
-                    varcheck["values"] = varcheck["values"] && checkfld.values[t] == dsvar[:,:,:,t]
-                elseif length(size(dsvar)) == 2
-                    varcheck["values"] = varcheck["values"] && checkfld.values[t] == dsvar[:,t]
+            if NCTiles.hastimedim(checkfld)
+                for t in 1:length(checkfld.values)
+                    if length(size(dsvar)) == 3
+                        varcheck["values"] = varcheck["values"] && checkfld.values[t] == dsvar[:,:,t]
+                    elseif length(size(dsvar)) == 4
+                        varcheck["values"] = varcheck["values"] && checkfld.values[t] == dsvar[:,:,:,t]
+                    elseif length(size(dsvar)) == 2
+                        varcheck["values"] = varcheck["values"] && checkfld.values[t] == dsvar[:,t]
+                    end
                 end
             end
         else
@@ -97,7 +132,37 @@ function testfile(fname,checkfld)
             end
         end
     elseif isa(checkfld.values,TileData)
-        println("No value check for TileData")
+        itile = Int(ds.attrib["itile"])
+        varcheck["values"] = true
+        grid = checkfld.values.tileinfo["XC"].grid
+        gridvars = GridLoad(grid)
+        land = gridvars["hFacC"]
+        for f in land.fIndex
+            for d in 1:size(land,2)
+                land[f,d][land[f,d].==0] .= NaN
+                land[f,d][land[f,d].>0] .= 1
+            end
+        end
+        if isa(checkfld.values.vals,BinData)
+            for t in 1:length(checkfld.values.vals.fnames)
+                data = read(readbin(checkfld.values.vals.fnames[t],
+                                    checkfld.values.vals.precision,checkfld.values.vals.iosize,
+                                    checkfld.values.vals.fldidx),checkfld.values.tileinfo["XC"])
+                testdata = NCTiles.gettile(data,checkfld.values.tileinfo,checkfld.values.tilesize,itile)
+                landtile = NCTiles.gettile(land,checkfld.values.tileinfo,checkfld.values.tilesize,itile)
+                testdata = applylandmask(testdata,landtile)
+                if length(size(dsvar)) == 3
+                    varcheck["values"] = varcheck["values"] && isequal(testdata,dsvar[:,:,t])
+                elseif length(size(dsvar)) == 4
+                    varcheck["values"] = varcheck["values"] && isequal(testdata,dsvar[:,:,:,t])
+                elseif length(size(dsvar)) == 2
+                    varcheck["values"] = varcheck["values"] && isequal(testdata,dsvar[:,t])
+                end
+            end
+        else
+            testdata = NCTiles.gettile(checkfld.values.vals,checkfld.values.tileinfo,checkfld.values.tilesize,itile)
+            varcheck["values"] = varcheck["values"] && ((testdata .== dsvar) + isnan.(dsvar)) == ones(Int,size(dsvar)...)
+        end
     end
     pass = pass && varcheck["values"]
 
@@ -118,27 +183,48 @@ function testfile(fname,checkfld)
                 end
             end
         end
-        println("The following file elements do not match the field elements:\n"*missmatchstring[3:end])
+        println("The following file elements do not match the field "*checkfld.name*" elements:\n"*missmatchstring[3:end])
     end
     return pass
+end
+
+function applylandmask(data,land)
+    if isa(data,NCvar)
+        if length(data.dims) == 2
+                dataout = NCTiles.replacevalues(
+                NCTiles.replacevalues(data.values.*land[:,1],data.values),
+                data)
+        else
+            dataout = NCTiles.replacevalues(
+                NCTiles.replacevalues(data.values.*land,data.values),
+                data)
+        end
+    else
+        if ndims(data) == 2
+            dataout = data.*land[:,:,1]
+        else
+            dataout = data.*land
+        end
+    end
+    return dataout
 end
 
 function maketestdata()
     lon=-180:20:180; lat=-90:20:90;
     depth = 5:10:100
     n1,n2,n3 = (length(lon),length(lat),length(depth))
-    
+
     timeinterval = 1
     nsteps = 5
     time_steps = timeinterval/2:timeinterval:timeinterval*nsteps
     time_units = "days from 1992-01-01"
-    
+
     data2d = [ones(Float32,n1,n2) for t in 1:nsteps]
     data3d = [ones(Float32,n1,n2,n3) for t in 1:nsteps]
     units = "test_units"
     longname2d = "Two Dimensional Test Data"
     longname3d = "Three Dimensional Test Data"
-    
+
     dims = [NCvar("lon_c","degrees_east",n1,lon,Dict("long_name" => "longitude"),NCDatasets),
             NCvar("lat_c","degrees_north",n2,lat,Dict("long_name" => "latitude"),NCDatasets),
             NCvar("dep_c","m",n3,depth,Dict("long_name" => "depth","standard_name" => "depth","positive" => "down"),NCDatasets),
@@ -151,18 +237,54 @@ function maketestdata()
 
     fnames2d = [mktemp()[1] for t in 1:length(data2d)]
     fnames3d = [mktemp()[1] for t in 1:length(data3d)]
+    fnamestile2d = [mktemp()[1] for t in 1:length(data2d)]
 
     for t in 1:length(data2d)
         write(fnames2d[t],hton.(data2d[t]))
     end
-    
+
     for t in 1:length(data3d)
         write(fnames3d[t],hton.(data3d[t]))
     end
 
+    tilesize = (16,16)
+    grid = GridSpec("CubeSphere",getgrid())
+    for f in fnamestile2d
+        cp(joinpath(grid.path,"Depth.data"),f,force=true)
+    end
+    dep = -1 .* collect([-5 -15 -25 -35 -45 -55 -65 -75.0049972534180 -85.0250015258789 -95.0950012207031 -105.309997558594 -115.870002746582 -127.150001525879 -139.740005493164 -154.470001220703 -172.399993896484 -194.735000610352 -222.710006713867 -257.470001220703 -299.929992675781 -350.679992675781 -409.929992675781 -477.470001220703 -552.710021972656 -634.734985351563 -722.400024414063 -814.469970703125 -909.739990234375 -1007.15502929688 -1105.90502929688 -1205.53503417969 -1306.20495605469 -1409.15002441406  -1517.09497070313 -1634.17504882813 -1765.13500976563 -1914.15002441406 -2084.03491210938 -2276.22509765625 -2491.25000000000 -2729.25000000000 -2990.25000000000 -3274.25000000000 -3581.25000000000 -3911.25000000000 -4264.25000000000 -4640.25000000000 -5039.25000000000 -5461.25000000000 -5906.25000000000]')
+    tile_ex = Dict(["tilesize" => tilesize,
+                    "grid" => grid,
+                    "dims" =>   [NCvar("i_c","1",tilesize[1],1:tilesize[1],Dict("long_name" => "Cartesian coordinate 1"),NCDatasets),
+                                NCvar("j_c","1",tilesize[2],1:tilesize[2],Dict("long_name" => "Cartesian coordinate 2"),NCDatasets),
+                                NCvar("dep_c","m",size(dep),dep,Dict("long_name" => "depth","standard_name" => "depth","positive" => "down"),NCDatasets),
+                                NCvar("tim","days since 1992-1-1 0:0:0",Inf,time_steps,Dict(("long_name" => "time","standard_name" => "time")),NCDatasets)],
+                    "fnamestile2d" => fnamestile2d
+                    ])
+
     return Dict(["data2d" => data2d, "data3d" => data3d,
                  "units" => units, "dims" => dims,
                  "longname2d" => longname2d,"longname3d" => longname3d,
-                 "fnames2d" => fnames2d, "fnames3d" => fnames3d])
+                 "fnames2d" => fnames2d, "fnames3d" => fnames3d, "tile_ex" => tile_ex])
 
+end
+
+function getgrid()
+
+    testdir = abspath(joinpath(dirname(pathof(NCTiles)),"..","test"))
+    griddir = joinpath(testdir,"GRID_CS32/")
+    if ~ispath(griddir)
+        try
+            file = joinpath(testdir,"GRID_CS32.tar.gz")
+            download("https://github.com/gaelforget/GRID_CS32/archive/master.tar.gz",file)
+            run(`tar -xzf $file -C $testdir`)
+            olddir = joinpath(testdir,"GRID_CS32-master")
+            run(`mv $olddir $griddir`)
+            run(`rm $file`)
+        catch e
+            println("Could not download and extract grid. To fix, get the grid from https://github.com/gaelforget/GRID_CS32/ and put it in the "*testdir*" directory.")
+        end
+    end
+
+    return griddir
 end
