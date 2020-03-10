@@ -6,7 +6,13 @@ Helper function: Determines number of time steps in data d. Input d can be
 BinData, NCData, TileData, or an Array.
 """
 function getnsteps(d)
-    if isa(d,BinData)
+    if isa(d,NewData)
+        if isa(d.flds,Array{BinData}) || isa(d.flds,Array{NCData})
+            nsteps = getnsteps(d.flds[1])
+        else
+            nsteps = getnsteps(d.flds)
+        end
+    elseif isa(d,BinData)
         if isa(d.fnames,Array)
             nsteps = length(d.fnames)
         else

@@ -231,6 +231,7 @@ function addData(v::Union{NCDatasets.CFVariable,NetCDF.NcVar,Array},var::NCvar;s
     isBinData = isa(var.values,BinData)
     isNCData = isa(var.values,NCData)
     isTileData = isa(var.values,TileData)
+    isNewData = isa(var.values,NewData)
     if isTileData
         isBinData = isa(var.values.vals,BinData)
     end
@@ -240,7 +241,7 @@ function addData(v::Union{NCDatasets.CFVariable,NetCDF.NcVar,Array},var::NCvar;s
         ndims = ndims-1
     end
 
-    if isBinData || isNCData || isTileData || isa(var.values[1],Array) # Binary files or array of timesteps
+    if isBinData || isNCData || isTileData || isNewData || isa(var.values[1],Array) # Binary files or array of timesteps
 
         if isBinData && ~ isTileData
             if isa(var.values.fnames,Array)
@@ -272,6 +273,8 @@ function addData(v::Union{NCDatasets.CFVariable,NetCDF.NcVar,Array},var::NCvar;s
         for i = startidx:nsteps
             if isBinData || isNCData || isTileData
                 v0 = readdata(var.values,i)
+            elseif isNewData
+                v0 = calcNewFld(var.values,i)
             else
                 v0 = var.values[i]
             end
