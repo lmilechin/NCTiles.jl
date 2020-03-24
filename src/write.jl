@@ -52,6 +52,11 @@ function BinData(fnames::Union{Array{String},String},precision::Type,iosize::Tup
     return BinData(fnames,precision,iosize,findfirst(meta["fldList"] .== fldname)[2])
 end
 
+import ndims
+function ndims(d::BinData)
+    ndims = length(d.iosize)
+end
+
 """
     NCData
 
@@ -231,7 +236,7 @@ function addData(v::Union{NCDatasets.CFVariable,NetCDF.NcVar,Array},var::NCvar;s
     isBinData = isa(var.values,BinData)
     isNCData = isa(var.values,NCData)
     isTileData = isa(var.values,TileData)
-    isNewData = isa(var.values,NewData)
+    isDataRecipe = isa(var.values,DataRecipe)
     if isTileData
         isBinData = isa(var.values.vals,BinData)
     end
@@ -241,7 +246,7 @@ function addData(v::Union{NCDatasets.CFVariable,NetCDF.NcVar,Array},var::NCvar;s
         ndims = ndims-1
     end
 
-    if isBinData || isNCData || isTileData || isNewData || isa(var.values[1],Array) # Binary files or array of timesteps
+    if isBinData || isNCData || isTileData || isDataRecipe || isa(var.values[1],Array) # Binary files or array of timesteps
 
         if isBinData && ~ isTileData
             if isa(var.values.fnames,Array)
@@ -273,7 +278,7 @@ function addData(v::Union{NCDatasets.CFVariable,NetCDF.NcVar,Array},var::NCvar;s
         for i = startidx:nsteps
             if isBinData || isNCData || isTileData
                 v0 = readdata(var.values,i)
-            elseif isNewData
+            elseif isDataRecipe
                 v0 = calcNewFld(var.values,i)
             else
                 v0 = var.values[i]
@@ -321,7 +326,7 @@ function addData(v::Union{NCDatasets.CFVariable,NetCDF.NcVar,Array},var::NCvar;s
             v[:,:,:,:] = v0
         end
     else
-        print("Unrecognized values")
+        println("Unrecognized values")
     end
     return nothing
 end

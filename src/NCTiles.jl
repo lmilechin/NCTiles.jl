@@ -14,7 +14,8 @@ include("data_recipe.jl")
 
 export NCvar, BinData, NCData, TileData, readbin, readncfile
 export createfile, addDim, addVar, addData, addDimData
-export write, calcNewFld
+export write
+export DataRecipe, calcNewFld
 
 
 end # module
