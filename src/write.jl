@@ -52,10 +52,10 @@ function BinData(fnames::Union{Array{String},String},precision::Type,iosize::Tup
     return BinData(fnames,precision,iosize,findfirst(meta["fldList"] .== fldname)[2])
 end
 
-import ndims
-function ndims(d::BinData)
-    ndims = length(d.iosize)
-end
+#import ndims
+#function ndims(d::BinData)
+#    ndims = length(d.iosize)
+#end
 
 """
     NCData
